@@ -6,18 +6,18 @@
 # 0. CARREGAMENTO DE PACOTES
 # ------------------------------------------------------------------
 
-require(readxl)                # Leitura de arquivos Excel (.xlsx)
-require(dplyr)                 # Manipulação de dados (filter, etc.)
-require(quanteda)             # Processamento de texto e criação de corpus
-require(quanteda.textstats)   # Extração de estatísticas textuais
-library(writexl)              # Exportar resultados para Excel (.xlsx)
+if (!require(readxl)) install.packages("readxl"); library(readxl)
+if (!require(dplyr)) install.packages("dplyr"); library(dplyr)
+if (!require(quanteda)) install.packages("quanteda"); library(quanteda)
+if (!require(quanteda.textstats)) install.packages("quanteda.textstats"); library(quanteda.textstats)
+if (!require(writexl)) install.packages("writexl"); library(writexl)
 
 # ------------------------------------------------------------------
 # 1. LEITURA E FILTRAGEM DOS DADOS
 # ------------------------------------------------------------------
 
 # (1.1) Lê a planilha contendo os resumos dos artigos
-CIHEM_dados <- read_excel("C:/Users/alexa/OneDrive/Área de Trabalho/CIHEM/CIHEM_revisado_tr.xlsx")
+CIHEM_dados <- read_excel("CIHEM_revisado_tr.xlsx")
 
 # (1.2) Filtra os dados, removendo entradas com "N/A" nos resumos
 CIHEM_dados <- CIHEM_dados %>% 
@@ -28,7 +28,7 @@ CIHEM_dados <- CIHEM_dados %>%
 # ------------------------------------------------------------------
 
 # (2.1) Cria um corpus textual a partir da coluna "Resumo (tr)"
-CIHEM_corpus <- corpus(CIHEM_dados, text_field = "Resumo (tr)")
+CIHEM_corpus <- corpus(CIHEM_dados, text_field = "Resumo (tr)", docid_field = "ID")
 
 # (2.2) Tokeniza o texto: quebra os resumos em palavras (tokens)
 CIHEM_toks <- tokens(CIHEM_corpus)
@@ -38,7 +38,7 @@ CIHEM_toks <- tokens(CIHEM_corpus)
 # ------------------------------------------------------------------
 
 # (3.1) Remove as stopwords (palavras muito comuns, como "de", "e", "a", etc.)
-CIHEM_toks_stat <- tokens_remove(CIHEM_toks, pattern = stopwords("pt"), padding = TRUE)
+CIHEM_toks_stat <- tokens_remove(CIHEM_toks, pattern = stopwords("pt"), padding = FALSE)
 
 # (3.2) Extrai bigramas (colocações de 2 palavras) com frequência mínima de 40 ocorrências
 tstat_col_caps <- textstat_collocations(CIHEM_toks_stat, 
@@ -48,7 +48,10 @@ tstat_col_caps <- textstat_collocations(CIHEM_toks_stat,
                                         smoothing = 0.5)    # Suavização para cálculo de força da colocação
 
 # (3.3) Seleciona os top 20 bigramas (ajustável)
-top_bigrams <- head(tstat_col_caps, 20)
+head(tstat_col_caps, 20)
+
+# (3.4) salva o df de bigramas
+write_xlsx(tstat_col_caps, "tstat_col_caps.xlsx")
 
 # ------------------------------------------------------------------
 # 4. LOOP PARA BUSCAR KWIC E SALVAR ARQUIVOS POR BIGRAMA
@@ -58,10 +61,10 @@ top_bigrams <- head(tstat_col_caps, 20)
 if (!dir.exists("recortes")) dir.create("recortes")
 
 # (4.2) Inicia loop para cada bigrama identificado
-for (i in seq_len(nrow(top_bigrams))) {
+for (i in seq_len(nrow(tstat_col_caps))) {
   
   # (4.2.1) Extrai o bigrama atual e divide em duas palavras
-  bigrama <- c(top_bigrams$collocation[i] %>% strsplit(" ") %>% unlist())
+  bigrama <- c(tstat_col_caps$collocation[i] %>% strsplit(" ") %>% unlist())
   
   # (4.2.2) Compõe os tokens com o bigrama unido por underscore (ex: "história_oral")
   toks_comp <- tokens_compound(CIHEM_toks, pattern = list(bigrama))
@@ -93,5 +96,35 @@ for (i in seq_len(nrow(top_bigrams))) {
   } else {
     # (4.2.10) Mensagem se não encontrou o bigrama no texto
     cat("⚠️ Nenhum resultado para:", bigrama_pattern, "\n")
+  }
+}
+
+#####
+
+#indicar termos ausentes na lista entre aspas
+#isto ocorre devido padding = FALSE, ao remover tokens, que é utilizado para ampliar a busca
+termos <- c("formação de professores", "história da educação",
+            "ensino de matemática", "ensino da matemática",
+            "professores de matemática", "história da matemática")
+
+
+# Loop para cada termo
+for (termo in termos) {
+  bigrama <- strsplit(termo, " ")[[1]]
+  padrão <- gsub(" ", "_", termo)
+  
+  kwic_result <- kwic(
+    tokens_compound(CIHEM_toks, pattern = list(bigrama)),
+    pattern = padrão,
+    window = 10,
+    case_insensitive = TRUE
+  )
+  
+  if (nrow(kwic_result) > 0) {
+    write_xlsx(as.data.frame(kwic_result),
+               path = paste0("recortes/", padrão, ".xlsx"))
+    cat("✔️ Arquivo salvo para:", termo, "\n")
+  } else {
+    cat("⚠️ Nada encontrado para:", termo, "\n")
   }
 }
